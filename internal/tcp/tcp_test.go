@@ -1,0 +1,89 @@
+// Copyright 2021 Burak Sezer
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package tcp
+
+import (
+	"context"
+	"net"
+	"testing"
+	"time"
+
+	"github.com/buraksezer/memcached/config"
+	"github.com/buraksezer/memcached/internal/testutils"
+	"github.com/stretchr/testify/require"
+)
+
+func TestTCP_Server(t *testing.T) {
+	port, err := testutils.GetFreePort()
+	require.NoError(t, err)
+	c := &config.TCP{
+		BindAddr: "127.0.0.1",
+		BindPort: port,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	started := func() {
+		cancel()
+	}
+
+	var message = []byte("Hello, world!")
+
+	echoHandler := func(conn net.Conn) error {
+		data := make([]byte, len(message))
+		_, err := conn.Read(data)
+		if err != nil {
+			return err
+		}
+		_, err = conn.Write(data)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	s, err := New(c, started, echoHandler)
+	require.NoError(t, err)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.ListenAndServe()
+	}()
+
+	t.Run("Started callback", func(t *testing.T) {
+		select {
+		case <-time.After(time.Second):
+			require.Fail(t, "TCP server has not been started yet")
+		case <-ctx.Done():
+			return
+		}
+	})
+
+	t.Run("Make connection and send a message", func(t *testing.T) {
+		clientConn, err := net.Dial("tcp", net.JoinHostPort(c.BindAddr, c.BindPort))
+		require.NoError(t, err)
+
+		nr, err := clientConn.Write(message)
+		require.NoError(t, err)
+		require.Len(t, message, nr)
+
+		data := make([]byte, len(message))
+		_, err = clientConn.Read(data)
+		require.NoError(t, err)
+		require.Equal(t, message, data)
+	})
+
+	err = s.Shutdown()
+	require.NoError(t, err)
+}

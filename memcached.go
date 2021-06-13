@@ -1,4 +1,4 @@
-// Copyright 2020 Burak Sezer
+// Copyright 2021 Burak Sezer
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,3 +13,49 @@
 // limitations under the License.
 
 package memcached
+
+import (
+	"context"
+	"net"
+
+	"github.com/buraksezer/memcached/config"
+	"github.com/buraksezer/memcached/internal/tcp"
+)
+
+type Memcached struct {
+	server *tcp.Server
+
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func New(c *config.Config) (*Memcached, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	m := &Memcached{
+		ctx:    ctx,
+		cancel: cancel,
+	}
+
+	s, err := tcp.New(c.TCP, c.StartedCallback, m.dispatcher)
+	if err != nil {
+		return nil, err
+	}
+
+	m.server = s
+	return m, nil
+}
+
+func (m *Memcached) dispatcher(conn net.Conn) error {
+	return nil
+}
+
+func (m *Memcached) ListenAndServe() error {
+	return m.server.ListenAndServe()
+}
+
+func (m *Memcached) Shutdown() error {
+	m.cancel()
+
+	return m.server.Shutdown()
+}
